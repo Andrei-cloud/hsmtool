@@ -461,15 +461,12 @@ func (bc *BitwiseCalculator) validateHex(originalS string, entry *widget.Entry, 
 		return
 	}
 
-	hexLen := len(hexInput)
-	if hexLen == 16 || hexLen == 32 || hexLen == 48 || hexLen == 64 {
-		data, err := hex.DecodeString(hexInput)
-		if err == nil && len(data) > 0 {
-			kcv := hsm.CalculateKCV(data)
-			kcvLabel.SetText("KCV: " + strings.ToUpper(hex.EncodeToString(kcv)))
-		} else {
-			kcvLabel.SetText("KCV: Invalid")
-		}
+	data, err := hex.DecodeString(hexInput)
+	if err == nil && len(data) > 0 &&
+		(len(data) == 8 || len(data) == 16 || len(data) == 24 || len(data) == 32) {
+		// For DES keys, lengths should be 8 bytes (64 bit), 16 bytes (128 bit), 24 bytes (192 bit), or 32 bytes (256 bit)
+		kcv := hsm.CalculateKCV(data)
+		kcvLabel.SetText("KCV: " + strings.ToUpper(hex.EncodeToString(kcv)))
 	} else {
 		kcvLabel.SetText("KCV:")
 	}

@@ -480,9 +480,10 @@ func (bc *BitwiseCalculator) onGenerateKey(bitLen int) func() {
 		if bc.numComponents.Selected == "3" {
 			num = 3
 		}
-		parity := bc.parityBits.Selected
+		enforceOddParity := bc.parityBits.Selected == "Force Odd"
 
-		keyHex, combinedKCVHexStr, err := hsm.GenerateKey(bitLen)
+		// Generate key with parity enforcement if requested
+		keyHex, combinedKCVHexStr, err := hsm.GenerateKey(bitLen, enforceOddParity)
 		if err != nil {
 			bc.combinedKey.SetText("Error generating key")
 			bc.combinedKCV.SetText("KCV: Error")
@@ -491,6 +492,7 @@ func (bc *BitwiseCalculator) onGenerateKey(bitLen int) func() {
 		bc.combinedKey.SetText(strings.ToUpper(keyHex))
 		bc.combinedKCV.SetText("KCV: " + strings.ToUpper(combinedKCVHexStr))
 
+		// Split the key - components will have same parity as original key
 		components, _, err := hsm.SplitKey(keyHex, num)
 		if err != nil {
 			bc.comp1.SetText("Split Error")
@@ -501,30 +503,7 @@ func (bc *BitwiseCalculator) onGenerateKey(bitLen int) func() {
 				bc.comp3.SetText("")
 				bc.comp3KCV.SetText("KCV:")
 			}
-
 			return
-		}
-
-		if parity == "Force Odd" {
-			for i := range components {
-				compHex, pErr := enforceOddParity(components[i])
-				if pErr != nil {
-					switch i {
-					case 0:
-						bc.comp1.SetText("Parity Error")
-						bc.comp1KCV.SetText("KCV: Error")
-					case 1:
-						bc.comp2.SetText("Parity Error")
-						bc.comp2KCV.SetText("KCV: Error")
-					case 2:
-						bc.comp3.SetText("Parity Error")
-						bc.comp3KCV.SetText("KCV: Error")
-					}
-					components[i] = ""
-				} else {
-					components[i] = compHex
-				}
-			}
 		}
 
 		if len(components) > 0 {

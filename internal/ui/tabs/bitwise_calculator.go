@@ -523,6 +523,7 @@ func (bc *BitwiseCalculator) onGenerateKey(bitLen int) func() {
 				bc.comp3.SetText("")
 				bc.comp3KCV.SetText("KCV:")
 			}
+
 			return
 		}
 

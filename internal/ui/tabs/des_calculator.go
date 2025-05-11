@@ -165,7 +165,7 @@ func (c *DESCalculator) calculateKCV(key string) {
 	key = strings.ToUpper(strings.ReplaceAll(key, " ", ""))
 
 	// Validate key length.
-	if len(key)%16 != 0 || len(key) > 48 || len(key) == 0 {
+	if key == "" || len(key)%16 != 0 || len(key) > 48 {
 		c.kcv.SetText("Invalid key length")
 		return
 	}
@@ -202,7 +202,7 @@ func (c *DESCalculator) calculateKCV(key string) {
 func (c *DESCalculator) calculate() {
 	// Get and validate the key.
 	key := strings.ReplaceAll(c.keyInput.Text, " ", "")
-	if len(key)%16 != 0 || len(key) > 48 || len(key) == 0 {
+	if key == "" || len(key)%16 != 0 || len(key) > 48 {
 		c.result.SetText("Invalid key length")
 		return
 	}

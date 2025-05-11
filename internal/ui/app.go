@@ -20,7 +20,10 @@ func StartApp() {
 	application := app.New()
 	mainWindow := application.NewWindow(appTitle)
 
-	// Create tab container with all app tabs.
+	// Create settings tab with HSM connection first
+	settingsTab := tabs.NewSettings()
+
+	// Create tab container with all app tabs
 	tabContainer := container.NewAppTabs(
 		container.NewTabItemWithIcon("Key Manager", theme.HomeIcon(), tabs.NewKeyManager()),
 		container.NewTabItemWithIcon(
@@ -29,12 +32,12 @@ func StartApp() {
 			tabs.NewDESCalculator(),
 		),
 		container.NewTabItem("Bitwise Calculator", tabs.NewBitwiseCalculator()),
-		container.NewTabItemWithIcon("Settings", theme.SettingsIcon(), tabs.NewSettings()),
 		container.NewTabItemWithIcon(
 			"HSM Command",
 			theme.FileIcon(),
-			tabs.NewHSMCommandSender(),
+			tabs.NewHSMCommandSender(settingsTab.GetConnection()),
 		),
+		container.NewTabItemWithIcon("Settings", theme.SettingsIcon(), settingsTab),
 	)
 	tabContainer.SetTabLocation(container.TabLocationTop)
 
@@ -44,7 +47,10 @@ func StartApp() {
 	mainWindow.CenterOnScreen()
 
 	mainWindow.SetOnClosed(func() {
-		// TODO: Implement cleanup of sensitive data and connections.
+		// Clean up HSM connection on exit
+		if conn := settingsTab.GetConnection(); conn != nil {
+			conn.Disconnect()
+		}
 	})
 
 	mainWindow.SetMaster()

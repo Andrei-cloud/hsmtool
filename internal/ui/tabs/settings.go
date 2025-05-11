@@ -1,6 +1,7 @@
 package tabs
 
 import (
+	"errors"
 	"strconv"
 
 	"fyne.io/fyne/v2"
@@ -23,14 +24,15 @@ type Settings struct {
 	container *fyne.Container
 
 	// Connection settings.
-	hsmIP       *widget.Entry
-	hsmPort     *widget.Entry
-	lmkIndex    *widget.Select
-	statusLED   *canvas.Circle
-	statusText  *canvas.Text
-	connection  *hsm.Connection
-	connectBtn  *widget.Button
-	currentConn bool
+	hsmIP           *widget.Entry
+	hsmPort         *widget.Entry
+	lmkIndex        *widget.Select
+	concurrentConns *widget.Entry // Added for concurrent connections.
+	statusLED       *canvas.Circle
+	statusText      *canvas.Text
+	connection      *hsm.Connection
+	connectBtn      *widget.Button
+	currentConn     bool
 }
 
 // NewSettings creates a new Settings tab.
@@ -45,6 +47,7 @@ func NewSettings() *Settings {
 	// Initialize connection fields.
 	s.hsmIP = widget.NewEntry()
 	s.hsmIP.SetPlaceHolder("Enter HSM IP/hostname...")
+	s.hsmIP.Text = "localhost" // Default HSM IP.
 
 	s.hsmPort = widget.NewEntry()
 	s.hsmPort.SetPlaceHolder("Enter port number...")
@@ -60,6 +63,18 @@ func NewSettings() *Settings {
 
 	s.lmkIndex = widget.NewSelect(LMKPairIndices, nil)
 	s.lmkIndex.SetSelected("00") // Default LMK pair
+
+	s.concurrentConns = widget.NewEntry()
+	s.concurrentConns.SetPlaceHolder("Number of connections...")
+	s.concurrentConns.Text = "1" // Default concurrent connections.
+	s.concurrentConns.OnChanged = func(text string) {
+		// Validate number of connections.
+		if text != "" {
+			if val, err := strconv.Atoi(text); err != nil || val < 1 {
+				s.concurrentConns.SetText("1")
+			}
+		}
+	}
 
 	// Status indicators
 	s.statusLED = canvas.NewCircle(theme.ErrorColor())
@@ -79,6 +94,10 @@ func NewSettings() *Settings {
 		&widget.FormItem{Text: "HSM IP/Hostname", Widget: s.hsmIP},
 		&widget.FormItem{Text: "Port", Widget: s.hsmPort},
 		&widget.FormItem{Text: "LMK Pair Index", Widget: s.lmkIndex},
+		&widget.FormItem{
+			Text:   "Concurrent Connections",
+			Widget: s.concurrentConns,
+		}, // Added to form.
 	)
 
 	// Create status bar with some padding around the status text
@@ -116,6 +135,7 @@ func (s *Settings) onConnectionStateChanged(state hsm.ConnectionState) {
 			s.hsmIP.Disable()
 			s.hsmPort.Disable()
 			s.lmkIndex.Disable()
+			s.concurrentConns.Disable() // Disable when connected.
 		} else {
 			s.statusLED.FillColor = theme.ErrorColor()
 			s.statusLED.StrokeColor = theme.ErrorColor()
@@ -127,6 +147,7 @@ func (s *Settings) onConnectionStateChanged(state hsm.ConnectionState) {
 			s.hsmIP.Enable()
 			s.hsmPort.Enable()
 			s.lmkIndex.Enable()
+			s.concurrentConns.Enable() // Enable when disconnected.
 		}
 		s.statusLED.Refresh()
 		s.statusText.Refresh()
@@ -140,9 +161,39 @@ func (s *Settings) onConnectClick() {
 		s.connectBtn.Disable()
 		s.connectBtn.SetText("Connecting...")
 
+		hsmIP := s.hsmIP.Text
+		if hsmIP == "" {
+			hsmIP = "localhost"
+		}
+
+		numConnsStr := s.concurrentConns.Text
+		if numConnsStr == "" {
+			numConnsStr = "1"              // Default to 1 if empty.
+			s.concurrentConns.SetText("1") // Update UI as well.
+		}
+		numConns64, err := strconv.ParseInt(numConnsStr, 10, 32)
+		if err != nil || numConns64 < 1 {
+			dialog.ShowError(
+				errors.New(
+					"invalid number of concurrent connections: '"+numConnsStr+"' please enter a positive integer",
+				),
+				fyne.CurrentApp().Driver().AllWindows()[0],
+			)
+			s.connectBtn.Enable()
+			s.connectBtn.SetText("Connect")
+			s.concurrentConns.SetText("1") // Reset to default valid value.
+
+			return
+		}
+		numConns := uint32(numConns64)
+
 		// Connect in a goroutine to avoid blocking UI
 		go func() {
-			err := s.connection.Connect(s.hsmIP.Text, s.hsmPort.Text)
+			err := s.connection.Connect(
+				hsmIP,
+				s.hsmPort.Text,
+				numConns,
+			) // Pass numConns to Connect method.
 
 			// Update UI on the main thread
 			fyne.Do(func() {
@@ -182,6 +233,7 @@ func (s *Settings) onTestConnection() {
 }
 
 // GetConnection returns the HSM connection instance.
+// TODO: This might need to change if anet.Pool or a similar manager is used.
 func (s *Settings) GetConnection() *hsm.Connection {
 	return s.connection
 }
@@ -194,9 +246,10 @@ func (s *Settings) CreateRenderer() fyne.WidgetRenderer {
 // Cleanup implements TabContent interface.
 func (s *Settings) Cleanup() {
 	if s.currentConn {
-		s.connection.Disconnect()
+		_ = s.connection.Disconnect() // check and ignore error on cleanup.
 	}
 	s.hsmIP.SetText("")
 	s.hsmPort.SetText("1500")
 	s.lmkIndex.SetSelected("00")
+	s.concurrentConns.SetText("1") // Reset concurrent connections.
 }

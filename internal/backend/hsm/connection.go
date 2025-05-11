@@ -28,7 +28,7 @@ type Connection struct {
 	port          string
 	broker        anet.Broker
 	stateChanged  func(ConnectionState)
-	poolCap       uint32
+	poolCap       uint32 // Renamed from initialPoolCap for clarity, set by Connect method.
 	workerCount   int
 	stopChan      chan struct{}
 	lastError     error
@@ -38,8 +38,8 @@ type Connection struct {
 // NewConnection creates a new HSM connection manager.
 func NewConnection(stateChanged func(ConnectionState)) *Connection {
 	return &Connection{
-		state:        atomic.Int32{},
-		poolCap:      2, // Number of TCP connections to maintain
+		state: atomic.Int32{},
+		// poolCap is now set in Connect method.
 		workerCount:  3, // Number of worker goroutines for the broker
 		stopChan:     make(chan struct{}),
 		stateChanged: stateChanged,
@@ -53,7 +53,10 @@ func NewConnection(stateChanged func(ConnectionState)) *Connection {
 }
 
 // Connect attempts to connect to the HSM.
-func (c *Connection) Connect(host, port string) error {
+func (c *Connection) Connect(
+	host, port string,
+	numConns uint32,
+) error { // Added numConns parameter.
 	// First check connection state without lock
 	if ConnectionState(c.state.Load()) == Connected {
 		return errors.New("already connected")
@@ -66,6 +69,11 @@ func (c *Connection) Connect(host, port string) error {
 	if ConnectionState(c.state.Load()) == Connected {
 		return errors.New("already connected")
 	}
+
+	if numConns < 1 {
+		numConns = 1 // Ensure at least one connection.
+	}
+	c.poolCap = numConns // Set pool capacity.
 
 	c.host = host
 	c.port = port
@@ -127,6 +135,16 @@ func (c *Connection) Disconnect() error {
 // GetState returns the current connection state.
 func (c *Connection) GetState() ConnectionState {
 	return ConnectionState(c.state.Load())
+}
+
+// GetPoolCapacity returns the configured capacity of the connection pool.
+// This indicates how many concurrent connections the pool can manage.
+func (c *Connection) GetPoolCapacity() uint32 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	// Ensure poolCap is returned even if broker is not yet initialized or is nil,
+	// as poolCap is set during Connect before broker creation.
+	return c.poolCap
 }
 
 // GetLastError returns the last error that occurred.

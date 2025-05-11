@@ -83,7 +83,7 @@ func (km *KeyManager) initializeTable() {
 		func() fyne.CanvasObject { // Template object.
 			return widget.NewLabel("Template")
 		},
-		func(i widget.TableCellID, o fyne.CanvasObject) {
+		func(_ widget.TableCellID, o fyne.CanvasObject) {
 			// Will populate data here.
 		},
 	)

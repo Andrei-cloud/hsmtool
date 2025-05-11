@@ -2,6 +2,7 @@ package tabs
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -214,7 +215,7 @@ func (c *DESCalculator) calculate() {
 
 	// Get and validate the data.
 	data := strings.ToUpper(strings.ReplaceAll(c.dataInput.Text, " ", ""))
-	if len(data) == 0 {
+	if data == "" {
 		c.result.SetText("No data provided")
 		return
 	}
@@ -281,56 +282,56 @@ func (c *DESCalculator) calculate() {
 }
 
 // onModeChanged shows or hides iv input based on mode.
-func (dc *DESCalculator) onModeChanged(mode string) {
+func (c *DESCalculator) onModeChanged(mode string) {
 	if mode == "CBC" {
-		dc.ivContainer.Show()
+		c.ivContainer.Show()
 	} else {
-		dc.ivContainer.Hide()
+		c.ivContainer.Hide()
 	}
-	dc.container.Refresh()
+	c.container.Refresh()
 }
 
 // onKeyChanged updates KCV when key input changes.
-func (dc *DESCalculator) onKeyChanged(text string) {
+func (c *DESCalculator) onKeyChanged(text string) {
 	clean := strings.ReplaceAll(text, " ", "")
 	if err := utils.ValidateHex(clean); err != nil {
-		dc.kcv.SetText("invalid hex string")
+		c.kcv.SetText("invalid hex string")
 		return
 	}
 	byteLen := len(clean) / 2
 	if byteLen != 8 && byteLen != 16 && byteLen != 24 {
-		dc.kcv.SetText("invalid key length")
+		c.kcv.SetText("invalid key length")
 		return
 	}
 	key, err := utils.DecodeHex(clean)
 	if err != nil {
-		dc.kcv.SetText("invalid hex string")
+		c.kcv.SetText("invalid hex string")
 		return
 	}
 	kcvVal, err := descrypto.CalculateKCV(key)
 	if err != nil {
-		dc.kcv.SetText("error calculating kcv")
+		c.kcv.SetText("error calculating kcv")
 		return
 	}
-	dc.kcv.SetText("KCV: " + strings.ToUpper(kcvVal))
+	c.kcv.SetText("KCV: " + strings.ToUpper(kcvVal))
 }
 
 // onDataChanged validates data input.
-func (dc *DESCalculator) onDataChanged(text string) {
+func (c *DESCalculator) onDataChanged(text string) {
 	// no-op; validation on calculate
 }
 
 // onIVChanged validates iv input.
-func (dc *DESCalculator) onIVChanged(text string) {
+func (c *DESCalculator) onIVChanged(text string) {
 	// no-op; validation on calculate
 }
 
 // onCalculate performs DES encrypt/decrypt.
-func (dc *DESCalculator) onCalculate() {
+func (c *DESCalculator) onCalculate() {
 	w := fyne.CurrentApp().Driver().AllWindows()[0]
 
 	// validate data
-	dataClean := strings.ToUpper(strings.ReplaceAll(dc.dataInput.Text, " ", ""))
+	dataClean := strings.ToUpper(strings.ReplaceAll(c.dataInput.Text, " ", ""))
 	if err := utils.ValidateHex(dataClean); err != nil {
 		dialog.ShowError(err, w)
 
@@ -339,7 +340,7 @@ func (dc *DESCalculator) onCalculate() {
 	data, _ := hex.DecodeString(dataClean)
 
 	// validate key
-	keyClean := strings.ToUpper(strings.ReplaceAll(dc.keyInput.Text, " ", ""))
+	keyClean := strings.ToUpper(strings.ReplaceAll(c.keyInput.Text, " ", ""))
 	if err := utils.ValidateHex(keyClean); err != nil {
 		dialog.ShowError(err, w)
 
@@ -347,7 +348,7 @@ func (dc *DESCalculator) onCalculate() {
 	}
 	keyBytes, _ := hex.DecodeString(keyClean)
 	if len(keyBytes) != 8 && len(keyBytes) != 16 && len(keyBytes) != 24 {
-		dialog.ShowError(fmt.Errorf("invalid key length"), w)
+		dialog.ShowError(errors.New("invalid key length"), w)
 
 		return
 	}
@@ -356,16 +357,16 @@ func (dc *DESCalculator) onCalculate() {
 	params := &descrypto.DESParams{
 		Data:    data,
 		Key:     keyBytes,
-		Encrypt: dc.operation.Selected == "Encrypt",
+		Encrypt: c.operation.Selected == "Encrypt",
 	}
 	// mode
-	switch dc.mode.Selected {
+	switch c.mode.Selected {
 	case "ECB":
 		params.Mode = descrypto.ECB
 
 	case "CBC":
 		params.Mode = descrypto.CBC
-		ivClean := strings.ToUpper(strings.ReplaceAll(dc.ivInput.Text, " ", ""))
+		ivClean := strings.ToUpper(strings.ReplaceAll(c.ivInput.Text, " ", ""))
 		if err := utils.ValidateHex(ivClean); err != nil {
 			dialog.ShowError(err, w)
 
@@ -373,19 +374,19 @@ func (dc *DESCalculator) onCalculate() {
 		}
 		ivBytes, _ := hex.DecodeString(ivClean)
 		if len(ivBytes) != 8 {
-			dialog.ShowError(fmt.Errorf("invalid iv length"), w)
+			dialog.ShowError(errors.New("invalid iv length"), w)
 
 			return
 		}
 		params.IV = ivBytes
 
 	default:
-		dialog.ShowError(fmt.Errorf("unsupported mode"), w)
+		dialog.ShowError(errors.New("unsupported mode"), w)
 
 		return
 	}
 	// padding
-	switch dc.padding.Selected {
+	switch c.padding.Selected {
 	case "None":
 		params.Padding = descrypto.NoPadding
 	case "ISO 9797-1 Method 1":
@@ -402,7 +403,7 @@ func (dc *DESCalculator) onCalculate() {
 
 		return
 	}
-	dc.result.SetText(strings.ToUpper(hex.EncodeToString(resultBytes)))
+	c.result.SetText(strings.ToUpper(hex.EncodeToString(resultBytes)))
 }
 
 // CreateRenderer returns a new renderer for the DESCalculator widget.
@@ -411,10 +412,10 @@ func (c *DESCalculator) CreateRenderer() fyne.WidgetRenderer {
 }
 
 // Cleanup implements TabContent interface.
-func (dc *DESCalculator) Cleanup() {
+func (c *DESCalculator) Cleanup() {
 	// Clear sensitive data.
-	dc.keyInput.SetText("")
-	dc.dataInput.SetText("")
-	dc.result.SetText("")
-	dc.kcv.SetText("KCV: ")
+	c.keyInput.SetText("")
+	c.dataInput.SetText("")
+	c.result.SetText("")
+	c.kcv.SetText("KCV: ")
 }

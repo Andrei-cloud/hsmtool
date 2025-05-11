@@ -69,7 +69,7 @@ func (la *LogsAudit) initializeTable() {
 		func() fyne.CanvasObject { // Template object.
 			return widget.NewLabel("Template")
 		},
-		func(i widget.TableCellID, o fyne.CanvasObject) {
+		func(_ widget.TableCellID, _ fyne.CanvasObject) { // Renamed both parameters to '_' to avoid unused parameter errors.
 			// Will populate log data here.
 		},
 	)

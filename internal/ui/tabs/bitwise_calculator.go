@@ -79,23 +79,19 @@ func (bc *BitwiseCalculator) initializeComponents() {
 	bc.combinedKey = widget.NewEntry()
 	bc.combinedKey.SetPlaceHolder("Combined key (hex, up to 64 chars)...")
 	bc.combinedKey.OnChanged = func(s string) { bc.validateHex(s, bc.combinedKey, 64) }
-	bc.combinedKey.SetMinSize(fyne.NewSize(320, 0)) // minimum width for ~32 hex chars.
 
 	bc.comp1 = widget.NewEntry()
 	bc.comp1.SetPlaceHolder("Component 1 (hex, up to 64 chars)...")
 	bc.comp1.OnChanged = func(s string) { bc.validateHex(s, bc.comp1, 64) }
-	bc.comp1.SetMinSize(fyne.NewSize(320, 0)) // minimum width for ~32 hex chars.
 
 	bc.comp2 = widget.NewEntry()
 	bc.comp2.SetPlaceHolder("Component 2 (hex, up to 64 chars)...")
 	bc.comp2.OnChanged = func(s string) { bc.validateHex(s, bc.comp2, 64) }
-	bc.comp2.SetMinSize(fyne.NewSize(320, 0)) // minimum width for ~32 hex chars.
 
 	bc.comp3 = widget.NewEntry()
 	bc.comp3.SetPlaceHolder("Component 3 (hex, up to 64 chars, optional)...")
 	bc.comp3.OnChanged = func(s string) { bc.validateHex(s, bc.comp3, 64) }
-	bc.comp3.SetMinSize(fyne.NewSize(320, 0)) // minimum width for ~32 hex chars.
-	bc.comp3.Hide()                           // Initially hidden.
+	bc.comp3.Hide() // Initially hidden.
 
 	// Component labels.
 	bc.comp3Label = widget.NewLabel("Component 3")
@@ -157,25 +153,57 @@ func NewBitwiseCalculator() *BitwiseCalculator {
 func (bc *BitwiseCalculator) onModeChange(mode string) {
 	bc.content.Objects = nil
 	if mode == "Key Sharing" {
-		combinedKeyRow := container.NewGridWithColumns(3,
-			widget.NewLabel("Combined Key"),
-			bc.combinedKey,
-			bc.combinedKCV,
+		labelWidth := float32(120)
+		entryWidth := float32(512)
+		kcvWidth := float32(60)
+
+		// Combined Key Row
+		combinedKeyRow := container.NewHBox(
+			container.NewGridWrap(
+				fyne.NewSize(labelWidth, bc.combinedKey.MinSize().Height),
+				widget.NewLabel("Combined Key"),
+			),
+			container.NewGridWrap(
+				fyne.NewSize(entryWidth, bc.combinedKey.MinSize().Height),
+				bc.combinedKey,
+			),
+			container.NewGridWrap(
+				fyne.NewSize(kcvWidth, bc.combinedKCV.MinSize().Height),
+				bc.combinedKCV,
+			),
 		)
-		component1Row := container.NewGridWithColumns(3,
-			widget.NewLabel("Component 1"),
-			bc.comp1,
-			bc.comp1KCV,
+
+		// Component 1 Row
+		component1Row := container.NewHBox(
+			container.NewGridWrap(
+				fyne.NewSize(labelWidth, bc.comp1.MinSize().Height),
+				widget.NewLabel("Component 1"),
+			),
+			container.NewGridWrap(fyne.NewSize(entryWidth, bc.comp1.MinSize().Height), bc.comp1),
+			container.NewGridWrap(
+				fyne.NewSize(kcvWidth, bc.comp1KCV.MinSize().Height),
+				bc.comp1KCV,
+			),
 		)
-		component2Row := container.NewGridWithColumns(3,
-			widget.NewLabel("Component 2"),
-			bc.comp2,
-			bc.comp2KCV,
+
+		// Component 2 Row
+		component2Row := container.NewHBox(
+			container.NewGridWrap(
+				fyne.NewSize(labelWidth, bc.comp2.MinSize().Height),
+				widget.NewLabel("Component 2"),
+			),
+			container.NewGridWrap(fyne.NewSize(entryWidth, bc.comp2.MinSize().Height), bc.comp2),
+			container.NewGridWrap(fyne.NewSize(kcvWidth, bc.comp2.MinSize().Height), bc.comp2KCV),
 		)
-		component3Row := container.NewGridWithColumns(3,
-			bc.comp3Label,
-			bc.comp3,
-			bc.comp3KCV,
+
+		// Component 3 Row
+		component3Row := container.NewHBox(
+			container.NewGridWrap(
+				fyne.NewSize(labelWidth, bc.comp3.MinSize().Height),
+				bc.comp3Label,
+			),
+			container.NewGridWrap(fyne.NewSize(entryWidth, bc.comp3.MinSize().Height), bc.comp3),
+			container.NewGridWrap(fyne.NewSize(kcvWidth, bc.comp3.MinSize().Height), bc.comp3KCV),
 		)
 
 		keyInputs := container.NewVBox(
@@ -448,7 +476,7 @@ func (bc *BitwiseCalculator) validateHex(originalS string, entry *widget.Entry, 
 }
 
 // onGenerateKey returns a handler for generating and displaying DES key components.
-func (bc *BitwiseCalculator) onGenerateKey(bits int) func() {
+func (bc *BitwiseCalculator) onGenerateKey(bitLen int) func() {
 	return func() {
 		bc.clearKeySharingFields()
 		num := 2
@@ -457,7 +485,7 @@ func (bc *BitwiseCalculator) onGenerateKey(bits int) func() {
 		}
 		parity := bc.parityBits.Selected
 
-		keyHex, combinedKCVHexStr, err := hsm.GenerateKey(bits)
+		keyHex, combinedKCVHexStr, err := hsm.GenerateKey(bitLen)
 		if err != nil {
 			bc.combinedKey.SetText("Error generating key")
 			bc.combinedKCV.SetText("KCV: Error")
@@ -476,6 +504,7 @@ func (bc *BitwiseCalculator) onGenerateKey(bits int) func() {
 				bc.comp3.SetText("")
 				bc.comp3KCV.SetText("KCV:")
 			}
+
 			return
 		}
 

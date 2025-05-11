@@ -3,6 +3,7 @@ module github.com/andrei-cloud/hsmtool
 go 1.24.2
 
 require (
+	fyne.io/fyne v1.4.3
 	fyne.io/fyne/v2 v2.6.1
 	github.com/andrei-cloud/anet v0.0.0-20250430195542-6f1a93d89d35
 	github.com/andrei-cloud/go_hsm v0.0.0
@@ -34,4 +35,5 @@ require (
 )
 
 replace github.com/andrei-cloud/anet => ../anet
+
 replace github.com/andrei-cloud/go_hsm => ../go_hsm

@@ -5,6 +5,7 @@ import (
 	"crypto/des"
 	"encoding/hex"
 	"fmt"
+	"strings"
 )
 
 // CipherMode specifies the block cipher mode of operation.
@@ -15,8 +16,6 @@ const (
 	ECB CipherMode = iota
 	// CBC is Cipher Block Chaining mode.
 	CBC
-	// CFB is Cipher Feedback mode.
-	CFB
 )
 
 // PaddingMode specifies the padding method.
@@ -35,6 +34,7 @@ const (
 type DESParams struct {
 	Data    []byte
 	Key     []byte
+	IV      []byte // iv for CBC mode.
 	Mode    CipherMode
 	Padding PaddingMode
 	Encrypt bool
@@ -63,8 +63,8 @@ func CalculateKCV(key []byte) (string, error) {
 		return "", fmt.Errorf("failed to calculate KCV: %v", err)
 	}
 
-	// Return first 3 bytes as hex.
-	return hex.EncodeToString(result[:3]), nil
+	// Return first 3 bytes as uppercase hex.
+	return strings.ToUpper(hex.EncodeToString(result[:3])), nil
 }
 
 // ProcessDES performs DES encryption/decryption according to parameters.
@@ -84,6 +84,12 @@ func ProcessDES(params *DESParams) ([]byte, error) {
 
 	if len(params.Key) == 8 {
 		block, err = des.NewCipher(params.Key)
+	} else if len(params.Key) == 16 {
+		// For double length key, use K1,K2,K1 mode
+		tripleKey := make([]byte, 24)
+		copy(tripleKey[:16], params.Key)     // Copy K1,K2
+		copy(tripleKey[16:], params.Key[:8]) // Copy K1 again
+		block, err = des.NewTripleDESCipher(tripleKey)
 	} else {
 		block, err = des.NewTripleDESCipher(params.Key)
 	}
@@ -102,12 +108,22 @@ func ProcessDES(params *DESParams) ([]byte, error) {
 	switch params.Mode {
 	case ECB:
 		processECB(block, paddedData, result, params.Encrypt)
+
 	case CBC:
-		// TODO: Implement CBC mode.
-		return nil, fmt.Errorf("CBC mode not implemented")
-	case CFB:
-		// TODO: Implement CFB mode.
-		return nil, fmt.Errorf("CFB mode not implemented")
+		// Validate iv length.
+		if len(params.IV) != block.BlockSize() {
+			return nil, fmt.Errorf("invalid iv length: must be %d bytes", block.BlockSize())
+		}
+		if params.Encrypt {
+			encrypter := cipher.NewCBCEncrypter(block, params.IV)
+
+			encrypter.CryptBlocks(result, paddedData)
+
+		} else {
+			decrypter := cipher.NewCBCDecrypter(block, params.IV)
+
+			decrypter.CryptBlocks(result, paddedData)
+		}
 	default:
 		return nil, fmt.Errorf("unsupported mode")
 	}

@@ -2,11 +2,9 @@ package crypto
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 )
-
-// BitwiseOperation represents a bitwise operation type.
-type BitwiseOperation string
 
 const (
 	// XOR operation.
@@ -19,6 +17,9 @@ const (
 	NOT BitwiseOperation = "NOT"
 )
 
+// BitwiseOperation represents a bitwise operation type.
+type BitwiseOperation string
+
 // BitwiseParams holds parameters for bitwise operations.
 type BitwiseParams struct {
 	Operation BitwiseOperation
@@ -29,7 +30,7 @@ type BitwiseParams struct {
 // PerformBitwise executes the specified bitwise operation.
 func PerformBitwise(params *BitwiseParams) (string, error) {
 	if params == nil {
-		return "", fmt.Errorf("params cannot be nil")
+		return "", errors.New("params cannot be nil")
 	}
 
 	// Decode hex input A.
@@ -44,6 +45,7 @@ func PerformBitwise(params *BitwiseParams) (string, error) {
 		for i := range a {
 			result[i] = ^a[i]
 		}
+
 		return hex.EncodeToString(result), nil
 	}
 
@@ -55,7 +57,7 @@ func PerformBitwise(params *BitwiseParams) (string, error) {
 
 	// Validate input lengths match.
 	if len(a) != len(b) {
-		return "", fmt.Errorf("input blocks must be same length")
+		return "", errors.New("input blocks must be same length")
 	}
 
 	result := make([]byte, len(a))

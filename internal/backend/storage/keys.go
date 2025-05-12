@@ -2,15 +2,13 @@ package storage
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 )
-
-// KeyType represents the type of cryptographic key.
-type KeyType string
 
 const (
 	// ZMK is Zone Master Key.
@@ -24,6 +22,9 @@ const (
 	// KEK is Key Encryption Key.
 	KEK KeyType = "KEK"
 )
+
+// KeyType represents the type of cryptographic key.
+type KeyType string
 
 // KeyEntry represents a stored key record.
 type KeyEntry struct {
@@ -66,7 +67,7 @@ func (ks *KeyStore) Store(entry KeyEntry) error {
 	defer ks.mu.Unlock()
 
 	if entry.Name == "" {
-		return fmt.Errorf("key name cannot be empty")
+		return errors.New("key name cannot be empty")
 	}
 
 	if entry.CreatedAt.IsZero() {
@@ -84,6 +85,7 @@ func (ks *KeyStore) Get(name string) (KeyEntry, bool) {
 	defer ks.mu.RUnlock()
 
 	entry, exists := ks.keys[name]
+
 	return entry, exists
 }
 
@@ -96,6 +98,7 @@ func (ks *KeyStore) List() []KeyEntry {
 	for _, entry := range ks.keys {
 		entries = append(entries, entry)
 	}
+
 	return entries
 }
 
@@ -105,10 +108,11 @@ func (ks *KeyStore) Delete(name string) error {
 	defer ks.mu.Unlock()
 
 	if _, exists := ks.keys[name]; !exists {
-		return fmt.Errorf("key not found")
+		return errors.New("key not found")
 	}
 
 	delete(ks.keys, name)
+
 	return ks.save()
 }
 

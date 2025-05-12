@@ -171,6 +171,10 @@ func (c *Connection) ExecuteCommand(cmd []byte) ([]byte, error) {
 		return nil, errors.New("not connected to HSM")
 	}
 
+	if c.broker == nil {
+		return nil, errors.New("not connected to HSM")
+	}
+
 	resp, err := c.broker.Send(&cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send command: %w", err)

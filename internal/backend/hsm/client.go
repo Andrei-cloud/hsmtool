@@ -97,5 +97,7 @@ func (c *Client) Close() {
 	defer c.mu.Unlock()
 
 	c.isReady = false
-	c.pool.Close()
+	if c.pool != nil {
+		c.pool.Close()
+	}
 }

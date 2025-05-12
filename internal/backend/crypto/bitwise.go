@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -46,7 +47,7 @@ func PerformBitwise(params *BitwiseParams) (string, error) {
 			result[i] = ^a[i]
 		}
 
-		return hex.EncodeToString(result), nil
+		return strings.ToUpper(hex.EncodeToString(result)), nil
 	}
 
 	// Decode hex input B for other operations.
@@ -80,5 +81,5 @@ func PerformBitwise(params *BitwiseParams) (string, error) {
 		return "", fmt.Errorf("unsupported operation: %s", params.Operation)
 	}
 
-	return hex.EncodeToString(result), nil
+	return strings.ToUpper(hex.EncodeToString(result)), nil
 }

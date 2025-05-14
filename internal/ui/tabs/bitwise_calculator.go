@@ -327,17 +327,27 @@ func (bc *BitwiseCalculator) onSplit() {
 	}
 
 	bc.combinedKey.SetText(strings.ToUpper(combined))
-	bc.combinedKCV.SetText("KCV: " + strings.ToUpper(origKCVHexStr))
+	// AES-256 combined KCV N/A
+	if data, _ := hex.DecodeString(combined); len(data) == 32 {
+		bc.combinedKCV.SetText("KCV: N/A")
+	} else {
+		bc.combinedKCV.SetText("KCV: " + strings.ToUpper(origKCVHexStr))
+	}
 
 	if len(components) > 0 {
 		bc.comp1.SetText(strings.ToUpper(components[0]))
+		// Component 1 KCV
 		data1, err1 := hex.DecodeString(components[0])
 		if err1 == nil && len(data1) > 0 {
-			kcv1, err := crypto.CalculateKCV(data1)
-			if err != nil {
-				bc.comp1KCV.SetText("KCV: Error")
+			if len(data1) == 32 {
+				bc.comp1KCV.SetText("KCV: N/A")
 			} else {
-				bc.comp1KCV.SetText("KCV: " + strings.ToUpper(kcv1))
+				kcv1, err := crypto.CalculateKCV(data1)
+				if err != nil {
+					bc.comp1KCV.SetText("KCV: Error")
+				} else {
+					bc.comp1KCV.SetText("KCV: " + strings.ToUpper(kcv1))
+				}
 			}
 		} else {
 			bc.comp1KCV.SetText("KCV:")
@@ -351,11 +361,15 @@ func (bc *BitwiseCalculator) onSplit() {
 		bc.comp2.SetText(strings.ToUpper(components[1]))
 		data2, err2 := hex.DecodeString(components[1])
 		if err2 == nil && len(data2) > 0 {
-			kcv2, err := crypto.CalculateKCV(data2)
-			if err != nil {
-				bc.comp2KCV.SetText("KCV: Error")
+			if len(data2) == 32 {
+				bc.comp2KCV.SetText("KCV: N/A")
 			} else {
-				bc.comp2KCV.SetText("KCV: " + strings.ToUpper(kcv2))
+				kcv2, err := crypto.CalculateKCV(data2)
+				if err != nil {
+					bc.comp2KCV.SetText("KCV: Error")
+				} else {
+					bc.comp2KCV.SetText("KCV: " + strings.ToUpper(kcv2))
+				}
 			}
 		} else {
 			bc.comp2KCV.SetText("KCV:")
@@ -370,12 +384,16 @@ func (bc *BitwiseCalculator) onSplit() {
 			bc.comp3.SetText(strings.ToUpper(components[2]))
 			data3, err3 := hex.DecodeString(components[2])
 			if err3 == nil && len(data3) > 0 {
-				kcv3, err := crypto.CalculateKCV(data3)
-				if err != nil {
-					bc.comp3KCV.SetText("KCV: Error")
-					return
+				if len(data3) == 32 {
+					bc.comp3KCV.SetText("KCV: N/A")
+				} else {
+					kcv3, err := crypto.CalculateKCV(data3)
+					if err != nil {
+						bc.comp3KCV.SetText("KCV: Error")
+						return
+					}
+					bc.comp3KCV.SetText("KCV: " + strings.ToUpper(kcv3))
 				}
-				bc.comp3KCV.SetText("KCV: " + strings.ToUpper(kcv3))
 			} else {
 				bc.comp3KCV.SetText("KCV:")
 				if err3 != nil {
@@ -427,7 +445,13 @@ func (bc *BitwiseCalculator) onCombine() {
 		bc.combinedKCV.SetText("KCV:")
 		return
 	}
-
+	// AES-256 combined KCV N/A
+	if len(data) == 32 {
+		bc.combinedKCV.SetText("KCV: N/A")
+		bc.container.Refresh()
+		return
+	}
+	// Calculate KCV for a valid DES key
 	kcv, err := crypto.CalculateKCV(data)
 	if err != nil {
 		bc.combinedKCV.SetText("KCV: Error")
@@ -444,7 +468,7 @@ func (bc *BitwiseCalculator) validateHex(originalS string, entry *widget.Entry, 
 	processedS.Grow(len(originalS))
 	for _, r := range originalS {
 		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
-			processedS.WriteRune(r)
+			_, _ = processedS.WriteRune(r)
 		}
 	}
 
@@ -475,15 +499,22 @@ func (bc *BitwiseCalculator) validateHex(originalS string, entry *widget.Entry, 
 		return
 	}
 
-	// Only calculate KCV for valid DES key lengths
 	data, err := hex.DecodeString(hexInput)
-	if err != nil || len(data) == 0 ||
-		(len(data) != 8 && len(data) != 16 && len(data) != 24 && len(data) != 32) {
+	if err != nil || len(data) == 0 {
 		kcvLabel.SetText("KCV:")
 		return
 	}
-
-	// Calculate KCV for a valid key
+	// AES-256 KCV is not applicable
+	if len(data) == 32 {
+		kcvLabel.SetText("KCV: N/A")
+		return
+	}
+	// Only calculate KCV for valid DES key lengths
+	if len(data) != 8 && len(data) != 16 && len(data) != 24 {
+		kcvLabel.SetText("KCV:")
+		return
+	}
+	// Calculate KCV for a valid DES key
 	kcv, err := crypto.CalculateKCV(data)
 	if err != nil {
 		kcvLabel.SetText("KCV: Error")
@@ -510,7 +541,12 @@ func (bc *BitwiseCalculator) onGenerateKey(bitLen int) func() {
 			return
 		}
 		bc.combinedKey.SetText(strings.ToUpper(keyHex))
-		bc.combinedKCV.SetText("KCV: " + strings.ToUpper(combinedKCVHexStr))
+		// Display combined KCV or N/A for AES-256
+		if bitLen == 256 {
+			bc.combinedKCV.SetText("KCV: N/A")
+		} else {
+			bc.combinedKCV.SetText("KCV: " + strings.ToUpper(combinedKCVHexStr))
+		}
 
 		// Split the key - components will have same parity as original key
 		components, _, err := crypto.SplitKey(keyHex, num)
@@ -531,12 +567,16 @@ func (bc *BitwiseCalculator) onGenerateKey(bitLen int) func() {
 			bc.comp1.SetText(strings.ToUpper(components[0]))
 			data1, err1 := hex.DecodeString(components[0])
 			if err1 == nil && len(data1) > 0 {
-				kcv1, err := crypto.CalculateKCV(data1)
-				if err != nil {
-					bc.comp1KCV.SetText("KCV: Error")
-					return
+				if len(data1) == 32 {
+					bc.comp1KCV.SetText("KCV: N/A")
+				} else {
+					kcv1, err := crypto.CalculateKCV(data1)
+					if err != nil {
+						bc.comp1KCV.SetText("KCV: Error")
+						return
+					}
+					bc.comp1KCV.SetText("KCV: " + strings.ToUpper(kcv1))
 				}
-				bc.comp1KCV.SetText("KCV: " + strings.ToUpper(kcv1))
 			} else {
 				bc.comp1KCV.SetText("KCV:")
 				if err1 != nil {
@@ -550,12 +590,16 @@ func (bc *BitwiseCalculator) onGenerateKey(bitLen int) func() {
 			bc.comp2.SetText(strings.ToUpper(components[1]))
 			data2, err2 := hex.DecodeString(components[1])
 			if err2 == nil && len(data2) > 0 {
-				kcv2, err := crypto.CalculateKCV(data2)
-				if err != nil {
-					bc.comp2KCV.SetText("KCV: Error")
-					return
+				if len(data2) == 32 {
+					bc.comp2KCV.SetText("KCV: N/A")
+				} else {
+					kcv2, err := crypto.CalculateKCV(data2)
+					if err != nil {
+						bc.comp2KCV.SetText("KCV: Error")
+						return
+					}
+					bc.comp2KCV.SetText("KCV: " + strings.ToUpper(kcv2))
 				}
-				bc.comp2KCV.SetText("KCV: " + strings.ToUpper(kcv2))
 			} else {
 				bc.comp2KCV.SetText("KCV:")
 				if err2 != nil {
@@ -565,27 +609,24 @@ func (bc *BitwiseCalculator) onGenerateKey(bitLen int) func() {
 			}
 		}
 
-		if num == 3 {
-			if len(components) > 2 {
-				bc.comp3.SetText(strings.ToUpper(components[2]))
-				data3, err3 := hex.DecodeString(components[2])
-				if err3 == nil && len(data3) > 0 {
+		if num == 3 && len(components) > 2 {
+			data3, err3 := hex.DecodeString(components[2])
+			if err3 == nil && len(data3) > 0 {
+				if len(data3) == 32 {
+					bc.comp3KCV.SetText("KCV: N/A")
+				} else {
 					kcv3, err := crypto.CalculateKCV(data3)
 					if err != nil {
 						bc.comp3KCV.SetText("KCV: Error")
 						return
 					}
 					bc.comp3KCV.SetText("KCV: " + strings.ToUpper(kcv3))
-				} else {
-					bc.comp3KCV.SetText("KCV:")
-					if err3 != nil {
-						bc.comp3KCV.SetText("KCV: Invalid")
-						return
-					}
 				}
 			} else {
-				bc.comp3.SetText("")
 				bc.comp3KCV.SetText("KCV:")
+				if err3 != nil {
+					bc.comp3KCV.SetText("KCV: Invalid")
+				}
 			}
 		}
 		bc.onNumComponentsChanged(bc.numComponents.Selected)

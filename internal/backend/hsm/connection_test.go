@@ -453,7 +453,7 @@ func TestConnection_ExecuteCommand(t *testing.T) {
 			}
 			c.mu.Unlock()
 
-			gotResp, err := c.ExecuteCommand(tt.command)
+			gotResp, err := c.ExecuteCommand(tt.command, 5*time.Second)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ExecuteCommand() error = %v, wantErr %v", err, tt.wantErr)

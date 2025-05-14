@@ -42,24 +42,29 @@ type HSMCommandSender struct {
 	respMutex  sync.Mutex
 	connection *hsm.Connection
 
-	// Response table.
-	responseScroll *container.Scroll
-	responseTable  *widget.Table
-	responseLabel  *widget.Label
+	// Response fields.
+	commandResponseField *widget.Entry // Field for the latest command response.
+	commandHistoryField  *widget.Entry // Field for the command history.
 
 	// Control.
 	sendBtn   *widget.Button
 	stopBtn   *widget.Button
 	isSending bool
 	stopChan  chan struct{}
+	sendMutex sync.Mutex
+	started   sync.WaitGroup // Track if send operation is running
+
+	// Logging flag.
+	logHistory         bool // Flag to enable or disable command history logging.
+	logHistoryCheckbox *widget.Check
 }
 
 // NewHSMCommandSender creates a new HSM Command Sender tab.
-func NewHSMCommandSender(conn *hsm.Connection) *HSMCommandSender {
+func NewHSMCommandSender(conn *hsm.Connection, logHistory bool) *HSMCommandSender {
 	hs := &HSMCommandSender{
 		connection: conn,
 		responses:  make([]Response, 0),
-		stopChan:   make(chan struct{}),
+		logHistory: logHistory, // Initialize the flag.
 	}
 	hs.ExtendBaseWidget(hs)
 
@@ -104,13 +109,35 @@ func NewHSMCommandSender(conn *hsm.Connection) *HSMCommandSender {
 	hs.counter = widget.NewLabel("Completed: 0")
 	hs.tpsLabel = widget.NewLabel("")
 
-	// Initialize response table.
-	hs.initializeTable()
+	// Initialize response fields.
+	hs.initializeCommandResponseUI()
 
 	// Create control buttons.
 	hs.sendBtn = widget.NewButton("Send", hs.onSend)
 	hs.stopBtn = widget.NewButton("Stop", hs.onStop)
 	hs.stopBtn.Disable()
+
+	// Register for connection state changes
+	if conn != nil {
+		conn.RegisterStateCallback(func(state hsm.ConnectionState, _ error) {
+			// Update UI based on connection state
+			fyne.Do(func() {
+				if state == hsm.Connected {
+					hs.sendBtn.Enable()
+					if hs.tpsLabel != nil {
+						hs.tpsLabel.SetText("")
+					}
+				} else {
+					if !hs.isSending {
+						hs.sendBtn.Disable()
+					}
+					if hs.tpsLabel != nil {
+						hs.tpsLabel.SetText("HSM disconnected - reconnecting...")
+					}
+				}
+			})
+		})
+	}
 
 	// Create form layout with bold section headers.
 	form := container.NewVBox(
@@ -148,130 +175,115 @@ func NewHSMCommandSender(conn *hsm.Connection) *HSMCommandSender {
 		),
 	)
 
-	// Create responses section with emphasized header.
-	hs.responseLabel = widget.NewLabelWithStyle(
-		"Command History",
-		fyne.TextAlignCenter,
-		fyne.TextStyle{Bold: true},
-	)
-	hs.responseScroll = container.NewScroll(hs.responseTable)
+	// Add a checkbox to toggle logging of command history.
+	hs.logHistoryCheckbox = widget.NewCheck("Log Command History", func(checked bool) {
+		hs.logHistory = checked
+	})
+	hs.logHistoryCheckbox.SetChecked(
+		hs.logHistory,
+	) // Set initial state based on the logHistory flag.
 
 	// Layout everything in the container
 	topContent := container.NewVBox(
 		form,
 		status,
 		buttons,
+		hs.logHistoryCheckbox, // Add the checkbox here.
 		widget.NewSeparator(),
-		hs.responseLabel,
+		hs.commandResponseField,
 	)
 
-	// Use Border layout to make response section expand
+	// Use Border layout to make the history window expand to the bottom.
 	hs.container = container.NewBorder(
-		topContent,                             // top
-		nil,                                    // bottom
-		nil,                                    // left
-		nil,                                    // right
-		container.NewPadded(hs.responseScroll), // center expands to fill space
+		topContent,             // top
+		nil,                    // bottom
+		nil,                    // left
+		nil,                    // right
+		hs.commandHistoryField, // center expands to fill space
 	)
 
 	return hs
 }
 
-func (hs *HSMCommandSender) initializeTable() {
-	hs.responseTable = widget.NewTable(
-		func() (int, int) {
-			hs.respMutex.Lock()
-			defer hs.respMutex.Unlock()
-			return len(hs.responses), 4 // Columns: Time, Request, Response, Latency.
-		},
-		func() fyne.CanvasObject {
-			return container.NewMax(widget.NewLabel(""))
-		},
-		func(i widget.TableCellID, o fyne.CanvasObject) {
-			// Ensure o is a *fyne.Container and its first object is a *widget.Label.
-			ctr, ok := o.(*fyne.Container)
-			if !ok || len(ctr.Objects) == 0 {
-				return
-			}
-			label, ok := ctr.Objects[0].(*widget.Label)
-			if !ok {
-				return
-			}
+func (hs *HSMCommandSender) initializeCommandResponseUI() {
+	// Create a read-only text area for the latest command response.
+	hs.commandResponseField = widget.NewMultiLineEntry()
+	hs.commandResponseField.Disable() // Set to read-only.
+	hs.commandResponseField.SetPlaceHolder("Latest command response will appear here.")
 
-			hs.respMutex.Lock()
-			defer hs.respMutex.Unlock()
-
-			if i.Row >= len(hs.responses) {
-				label.SetText("")
-				return
-			}
-
-			resp := hs.responses[i.Row]
-			label.TextStyle = fyne.TextStyle{Bold: true, Monospace: true}
-			label.Wrapping = fyne.TextWrapWord
-			label.Alignment = fyne.TextAlignLeading
-
-			switch i.Col {
-			case 0:
-				label.SetText(resp.Timestamp.Format("15:04:05.000"))
-			case 1:
-				label.SetText(resp.Request)
-			case 2:
-				label.SetText(resp.Response)
-			case 3:
-				label.SetText(resp.Latency.String())
-			}
-
-			label.Refresh()
-		},
-	)
-
-	hs.responseTable.SetColumnWidth(0, 130) // Timestamp.
-	hs.responseTable.SetColumnWidth(1, 258) // Request.
-	hs.responseTable.SetColumnWidth(2, 258) // Response.
-	hs.responseTable.SetColumnWidth(3, 120) // Latency.
+	// Create a read-only text area for the command history.
+	hs.commandHistoryField = widget.NewMultiLineEntry()
+	hs.commandHistoryField.Disable() // Set to read-only.
+	hs.commandHistoryField.SetPlaceHolder("Command history will appear here.")
 }
 
 func (hs *HSMCommandSender) addResponse(req, resp string, latency time.Duration) {
 	fyne.Do(func() {
-		hs.respMutex.Lock()
-		hs.responses = append(hs.responses, Response{
-			Timestamp: time.Now(),
-			Request:   req,
-			Response:  resp,
-			Latency:   latency,
-		})
-		hs.respMutex.Unlock()
-		if hs.responseTable != nil {
-			hs.responseTable.Refresh()
+		// Update the latest command response field.
+		hs.commandResponseField.SetText(resp)
+
+		if hs.logHistory {
+			// Format the new history entry.
+			newEntry := fmt.Sprintf(
+				"[%s] Command: %s\n[%s] Response: %s\nLatency: %d ms\n\n",
+				time.Now().Format("2006-01-02 15:04:05"), req,
+				time.Now().Format("2006-01-02 15:04:05"), resp,
+				latency.Milliseconds(),
+			)
+
+			// Append the new entry to the command history.
+			currentHistory := hs.commandHistoryField.Text
+			hs.commandHistoryField.SetText(currentHistory + newEntry)
+
+			// Scroll to the bottom of the command history field.
+			hs.commandHistoryField.CursorRow = len(hs.commandHistoryField.Text)
 		}
 	})
 }
 
 func (hs *HSMCommandSender) onSend() {
+	hs.sendMutex.Lock()
 	if hs.isSending {
+		hs.sendMutex.Unlock()
 		return
 	}
 
-	if hs.connection.GetState() != hsm.Connected {
+	// Check connection status before attempting to send
+	connState := hs.connection.GetState()
+	if connState != hsm.Connected {
+		hs.sendMutex.Unlock()
 		dialog.ShowError(
-			errors.New("hsm not connected"), // Changed to errors.New.
+			errors.New("hsm not connected - please wait for reconnection to complete"),
 			fyne.CurrentApp().Driver().AllWindows()[0],
 		)
 
 		return
+	}
+
+	lastError := hs.connection.GetLastError()
+	if lastError != nil {
+		// Show the error but allow the user to try sending anyway
+		dialog.ShowInformation(
+			"Connection Warning",
+			fmt.Sprintf(
+				"HSM connection reported an error but is still marked as connected: %v\nAttempting to send anyway.",
+				lastError,
+			),
+			fyne.CurrentApp().Driver().AllWindows()[0],
+		)
 	}
 
 	if hs.command.Text == "" {
+		hs.sendMutex.Unlock()
 		dialog.ShowError(
-			errors.New("command cannot be empty"), // Changed to errors.New.
+			errors.New("command cannot be empty"),
 			fyne.CurrentApp().Driver().AllWindows()[0],
 		)
 
 		return
 	}
 
-	// Parse request count.
+	// Parse request count
 	reqCount, err := strconv.Atoi(hs.reqCount.Text)
 	if err != nil || reqCount < 0 {
 		reqCount = 0
@@ -281,12 +293,13 @@ func (hs *HSMCommandSender) onSend() {
 		hs.reqCount.SetText("1")
 	}
 
+	// Reset state for new command
+	hs.stopChan = make(chan struct{}) // Create new channel for this send operation
+	hs.progress.SetValue(0)
+	hs.progress.Max = float64(reqCount)
 	hs.isSending = true
 	hs.sendBtn.Disable()
 	hs.stopBtn.Enable()
-	hs.stopChan = make(chan struct{})
-	hs.progress.SetValue(0)
-	hs.progress.Max = float64(reqCount)
 
 	if hs.tpsLabel != nil {
 		if reqCount <= 10 {
@@ -297,14 +310,13 @@ func (hs *HSMCommandSender) onSend() {
 	}
 
 	poolCapacity := hs.connection.GetPoolCapacity()
+	hs.sendMutex.Unlock() // Unlock before starting goroutine
 
-	if reqCount > 1 && poolCapacity > 1 {
-		numWorkers := int(poolCapacity)
-		if reqCount < numWorkers {
-			numWorkers = reqCount
-		}
-		go hs.sendConcurrent(reqCount, numWorkers)
+	if !hs.logHistory {
+		// Performance mode: send commands concurrently.
+		go hs.sendConcurrent(reqCount, int(poolCapacity))
 	} else {
+		// Default mode: send commands sequentially.
 		go hs.sendSequential(reqCount)
 	}
 }
@@ -317,41 +329,68 @@ func (hs *HSMCommandSender) sendSequential(reqCount int) {
 	var completed int32
 
 	defer func() {
-		isLoopCompleted := int(completed) == reqCount
 		fyne.Do(func() {
+			hs.sendMutex.Lock()
 			hs.isSending = false
 			hs.sendBtn.Enable()
 			hs.stopBtn.Disable()
 			hs.progress.SetValue(float64(completed))
-
 			if hs.tpsLabel != nil {
-				if !isLoopCompleted || reqCount <= 10 {
+				if reqCount <= 10 || int(completed) != reqCount {
 					hs.tpsLabel.SetText("")
 				}
 			}
+			hs.sendMutex.Unlock()
 		})
 	}()
 
 	for i := 0; i < reqCount; i++ {
 		select {
 		case <-hs.stopChan:
-			fyne.Do(func() {
-				if hs.tpsLabel != nil {
-					hs.tpsLabel.SetText("")
-				}
-			})
-
-			return
+			return // Exit the loop immediately if stop is signaled.
 		default:
-			startTime := time.Now()
-			respText, err := hs.connection.ExecuteCommand([]byte(hs.command.Text))
-			latency := time.Since(startTime)
-			response := ""
-			if err != nil {
-				response = "Error: " + err.Error()
-			} else {
-				response = string(respText)
+			// Check connection state before each send
+			if hs.connection.GetState() != hsm.Connected {
+				fyne.Do(func() {
+					if hs.tpsLabel != nil {
+						hs.tpsLabel.SetText("HSM disconnected - reconnecting...")
+					}
+					dialog.ShowError(
+						errors.New("hsm connection lost during command sequence"),
+						fyne.CurrentApp().Driver().AllWindows()[0],
+					)
+				})
+
+				return
 			}
+
+			startTime := time.Now()
+			respText, err := hs.connection.ExecuteCommand([]byte(hs.command.Text), 5*time.Second)
+			latency := time.Since(startTime)
+
+			var response string
+			switch {
+			case err != nil:
+				response = "Error: " + err.Error()
+				// If this is a connection/broker error, stop the sequence
+				if err.Error() == "hsm client not connected" ||
+					err.Error() == "broker is closed" ||
+					err.Error() == "command timed out" {
+					fyne.Do(func() {
+						if hs.tpsLabel != nil {
+							hs.tpsLabel.SetText("HSM disconnected - reconnecting...")
+						}
+					})
+					hs.addResponse(hs.command.Text, response, latency)
+
+					return
+				}
+			case respText != nil:
+				response = string(respText)
+			default:
+				response = "No response"
+			}
+
 			hs.addResponse(hs.command.Text, response, latency)
 			completed++
 
@@ -363,23 +402,25 @@ func (hs *HSMCommandSender) sendSequential(reqCount int) {
 					if elapsedTime.Seconds() > 0 {
 						tps := float64(completed) / elapsedTime.Seconds()
 						hs.tpsLabel.SetText(fmt.Sprintf("TPS: %.2f", tps))
-					} else if completed == 0 {
-						hs.tpsLabel.SetText("TPS: calculating...")
 					}
 				}
 			})
+
+			// Add a small delay between commands to prevent overwhelming the connection
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }
 
 // sendConcurrent sends commands using multiple goroutines.
-func (hs *HSMCommandSender) sendConcurrent(reqCount, numWorkers int) { // Grouped parameters.
+func (hs *HSMCommandSender) sendConcurrent(reqCount, numWorkers int) {
 	var batchStartTime time.Time
 	if reqCount > 10 {
 		batchStartTime = time.Now()
 	}
 	var completedCount atomic.Int32
 	var wg sync.WaitGroup
+	var stopSending atomic.Bool
 
 	jobs := make(chan int, reqCount)
 	for i := 0; i < reqCount; i++ {
@@ -388,19 +429,22 @@ func (hs *HSMCommandSender) sendConcurrent(reqCount, numWorkers int) { // Groupe
 	close(jobs)
 
 	defer func() {
+		wg.Wait() // Wait for all workers to finish
 		finalCompleted := completedCount.Load()
-		isLoopCompleted := int(finalCompleted) == reqCount
+
 		fyne.Do(func() {
+			hs.sendMutex.Lock()
 			hs.isSending = false
 			hs.sendBtn.Enable()
 			hs.stopBtn.Disable()
 			hs.progress.SetValue(float64(finalCompleted))
 
 			if hs.tpsLabel != nil {
-				if !isLoopCompleted || reqCount <= 10 {
+				if reqCount <= 10 || int(finalCompleted) != reqCount {
 					hs.tpsLabel.SetText("")
 				}
 			}
+			hs.sendMutex.Unlock()
 		})
 	}()
 
@@ -409,43 +453,74 @@ func (hs *HSMCommandSender) sendConcurrent(reqCount, numWorkers int) { // Groupe
 		go func() {
 			defer wg.Done()
 			for range jobs {
+				// Stop processing if signaled by another worker
+				if stopSending.Load() {
+					return
+				}
+
+				// Check for external stop signal
 				select {
 				case <-hs.stopChan:
-
-					return
+					stopSending.Store(true)
+					return // Exit the worker loop immediately if stop is signaled.
 				default:
-					// Check stopChan again before doing work, in case jobs were queued before stop.
-					select {
-					case <-hs.stopChan:
+					// Check connection state before each send
+					if hs.connection.GetState() != hsm.Connected {
+						stopSending.Store(true)
+						fyne.Do(func() {
+							if hs.tpsLabel != nil {
+								hs.tpsLabel.SetText("HSM disconnected - reconnecting...")
+							}
+							dialog.ShowError(
+								errors.New("hsm connection lost during command sequence"),
+								fyne.CurrentApp().Driver().AllWindows()[0],
+							)
+						})
 
 						return
-					default:
 					}
 
 					startTime := time.Now()
 					cmdText := hs.command.Text
-					respText, err := hs.connection.ExecuteCommand([]byte(cmdText))
+					respText, err := hs.connection.ExecuteCommand([]byte(cmdText), 5*time.Second)
 					latency := time.Since(startTime)
 					response := ""
-					if err != nil {
+					switch {
+					case err != nil:
 						response = "Error: " + err.Error()
-					} else {
+						// If this is a connection/broker error, stop the sequence
+						if err.Error() == "hsm client not connected" ||
+							err.Error() == "broker is closed" ||
+							err.Error() == "command timed out" {
+							stopSending.Store(true)
+							fyne.Do(func() {
+								if hs.tpsLabel != nil {
+									hs.tpsLabel.SetText("HSM disconnected - reconnecting...")
+								}
+							})
+							hs.addResponse(cmdText, response, latency)
+
+							return
+						}
+					case respText != nil:
 						response = string(respText)
+					default:
+						response = "No response"
 					}
 
+					// Record response and update UI
 					hs.addResponse(cmdText, response, latency)
-					currentCompleted := completedCount.Add(1)
+					newCount := completedCount.Add(1)
 
+					// Update progress and TPS if needed
 					fyne.Do(func() {
-						hs.progress.SetValue(float64(currentCompleted))
-						hs.counter.SetText(fmt.Sprintf("Completed: %d", currentCompleted))
+						hs.progress.SetValue(float64(newCount))
+						hs.counter.SetText(fmt.Sprintf("Completed: %d", newCount))
 						if hs.tpsLabel != nil && reqCount > 10 {
 							elapsedTime := time.Since(batchStartTime)
 							if elapsedTime.Seconds() > 0 {
-								tps := float64(currentCompleted) / elapsedTime.Seconds()
+								tps := float64(newCount) / elapsedTime.Seconds()
 								hs.tpsLabel.SetText(fmt.Sprintf("TPS: %.2f", tps))
-							} else if currentCompleted == 0 {
-								hs.tpsLabel.SetText("TPS: calculating...")
 							}
 						}
 					})
@@ -453,29 +528,28 @@ func (hs *HSMCommandSender) sendConcurrent(reqCount, numWorkers int) { // Groupe
 			}
 		}()
 	}
-
-	go func() {
-		wg.Wait()
-		select {
-		case <-hs.stopChan:
-			fyne.Do(func() {
-				if hs.tpsLabel != nil {
-					if int(completedCount.Load()) != reqCount {
-						hs.tpsLabel.SetText("")
-					}
-				}
-			})
-		default:
-		}
-	}()
 }
 
 func (hs *HSMCommandSender) onStop() {
+	hs.sendMutex.Lock()
+	defer hs.sendMutex.Unlock()
+
 	if !hs.isSending {
 		return
 	}
 
-	close(hs.stopChan)
+	if hs.stopChan != nil {
+		close(hs.stopChan)
+		// do not nil the channel so sequential send can detect closure
+	}
+
+	// Reset the state immediately for UI responsiveness.
+	hs.isSending = false
+	hs.sendBtn.Enable()
+	hs.stopBtn.Disable()
+	if hs.tpsLabel != nil {
+		hs.tpsLabel.SetText("")
+	}
 }
 
 func (hs *HSMCommandSender) CreateRenderer() fyne.WidgetRenderer {
@@ -483,10 +557,16 @@ func (hs *HSMCommandSender) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (hs *HSMCommandSender) Cleanup() {
-	if hs.isSending {
-		hs.onStop()
+	hs.sendMutex.Lock()
+	defer hs.sendMutex.Unlock()
+
+	if hs.isSending && hs.stopChan != nil {
+		close(hs.stopChan)
+		// do not nil the channel to allow proper channel semantics
+		hs.isSending = false // Ensure state is reset.
 	}
 
+	// Reset all UI elements
 	hs.command.SetText("")
 	hs.reqCount.SetText("0")
 	if hs.duration != nil {
@@ -500,5 +580,19 @@ func (hs *HSMCommandSender) Cleanup() {
 	}
 	if hs.progress != nil {
 		hs.progress.SetValue(0)
+	}
+	if hs.commandResponseField != nil {
+		hs.commandResponseField.SetText("")
+	}
+	if hs.commandHistoryField != nil {
+		hs.commandHistoryField.SetText("")
+	}
+
+	// Reset control elements
+	if hs.sendBtn != nil {
+		hs.sendBtn.Enable()
+	}
+	if hs.stopBtn != nil {
+		hs.stopBtn.Disable()
 	}
 }

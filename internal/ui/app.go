@@ -35,7 +35,7 @@ func StartApp() {
 		container.NewTabItemWithIcon(
 			"HSM Command",
 			theme.FileIcon(),
-			tabs.NewHSMCommandSender(settingsTab.GetConnection()),
+			tabs.NewHSMCommandSender(settingsTab.GetConnection(), true),
 		),
 		container.NewTabItemWithIcon("Settings", theme.SettingsIcon(), settingsTab),
 	)

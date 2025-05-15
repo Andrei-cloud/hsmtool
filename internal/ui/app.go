@@ -25,7 +25,11 @@ func StartApp() {
 
 	// Create tab container with all app tabs
 	tabContainer := container.NewAppTabs(
-		container.NewTabItemWithIcon("Key Manager", theme.HomeIcon(), tabs.NewKeyManager()),
+		container.NewTabItemWithIcon(
+			"Generate Key",
+			theme.HomeIcon(),
+			tabs.NewKeyManager(settingsTab.GetConnection()),
+		),
 		container.NewTabItemWithIcon(
 			"DES Calculator",
 			theme.ConfirmIcon(),

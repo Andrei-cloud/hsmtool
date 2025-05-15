@@ -1,19 +1,30 @@
 package tabs
 
 import (
+	"fmt"
+	"strings"
+	"time"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+	"github.com/andrei-cloud/hsmtool/internal/backend/hsm"
 )
 
-var KeyTypes = []string{"ZMK", "ZPK", "TMK", "PVK", "KEK"}
+// KeySchemes holds supported Variant-LMK key scheme tags.
+var KeySchemes = []string{"Z", "U", "T", "X", "Y"}
 
-var KeyLengths = []string{
-	"Single DES (8 bytes)",
-	"Double DES (16 bytes)",
-	"Triple DES (24 bytes)",
-	"AES-128",
-	"AES-256",
+// KeyTypes holds A0-supported DES and related keys with display names.
+var KeyTypes = []string{
+	"000 - ZMK",
+	"001 - ZPK",
+	"002 - PVK/Generic",
+	"003 - TAK",
+	"008 - ZAK",
+	"009 - BDK type-1",
+	"00A - ZEK",
+	"00B - DEK/TEK",
 }
 
 // KeyManager represents the Key Manager tab.
@@ -21,80 +32,125 @@ type KeyManager struct {
 	widget.BaseWidget
 	container *fyne.Container
 
+	connection *hsm.Connection
+
 	// Input fields.
-	keyName   *widget.Entry
 	keyType   *widget.Select
-	keyLength *widget.Select
+	keyScheme *widget.Select
 	keyInput  *widget.Entry
 	kcv       *widget.Label
-
-	// Stored keys table.
-	keysTable *widget.Table
 }
 
 // NewKeyManager creates a new Key Manager tab.
-func NewKeyManager() *KeyManager {
-	km := &KeyManager{}
+func NewKeyManager(conn *hsm.Connection) *KeyManager {
+	km := &KeyManager{connection: conn}
 	km.ExtendBaseWidget(km)
 
 	// Initialize input fields.
-	km.keyName = widget.NewEntry()
-	km.keyName.SetPlaceHolder("Enter key name...")
-
 	km.keyType = widget.NewSelect(KeyTypes, nil)
-	km.keyLength = widget.NewSelect(KeyLengths, nil)
+	km.keyScheme = widget.NewSelect(KeySchemes, nil)
 
 	km.keyInput = widget.NewEntry()
 	km.keyInput.SetPlaceHolder("Hex format key value...")
 
 	km.kcv = widget.NewLabel("KCV: ")
-	// Form actions will be set after form creation.// Create form layout.
+
+	// Create form layout.
 	form := widget.NewForm(
-		&widget.FormItem{Text: "Key Name", Widget: km.keyName},
 		&widget.FormItem{Text: "Key Type", Widget: km.keyType},
-		&widget.FormItem{Text: "Key Length", Widget: km.keyLength},
+		&widget.FormItem{Text: "Key Scheme", Widget: km.keyScheme},
 		&widget.FormItem{Text: "Key Value", Widget: km.keyInput},
 		&widget.FormItem{Text: "Check Value", Widget: km.kcv},
 	)
 
-	// Add buttons to form.
+	// Add generate button to form.
 	form.SubmitText = "Generate in HSM"
 	form.OnSubmit = km.onGenerateKey
-	form.CancelText = "Store Key"
-	form.OnCancel = km.onStoreKey
 
-	// Initialize stored keys table.
-	km.initializeTable()
-
-	// Layout everything in a container.
+	// Layout everything in a container - storage removed.
 	km.container = container.NewVBox(
 		form,
-		widget.NewSeparator(),
-		widget.NewLabelWithStyle("Stored Keys", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		km.keysTable,
 	)
 
 	return km
 }
 
-func (km *KeyManager) initializeTable() {
-	km.keysTable = widget.NewTable(
-		func() (int, int) { return 0, 4 }, // Initial size.
-		func() fyne.CanvasObject { // Template object.
-			return widget.NewLabel("Template")
-		},
-		func(_ widget.TableCellID, o fyne.CanvasObject) {
-			// Will populate data here.
-		},
-	)
-}
-
 func (km *KeyManager) onGenerateKey() {
-	// TODO: Implement key generation via HSM.
-}
+	// check HSM connection.
+	if km.connection.GetState() != hsm.Connected {
+		dialog.ShowError(
+			fmt.Errorf("hsm not connected - please connect first"),
+			fyne.CurrentApp().Driver().AllWindows()[0],
+		)
 
-func (km *KeyManager) onStoreKey() {
-	// TODO: Implement key storage.
+		return
+	}
+
+	// validate selected key scheme.
+	if km.keyScheme.Selected == "" {
+		dialog.ShowError(
+			fmt.Errorf("select key scheme"),
+			fyne.CurrentApp().Driver().AllWindows()[0],
+		)
+
+		return
+	}
+
+	// build A0 command: generate key under Variant LMK with scheme.
+	parts := strings.SplitN(km.keyType.Selected, " - ", 2)
+	keyCode := parts[0]
+	scheme := km.keyScheme.Selected
+	// mode '0' = generate under LMK only.
+	mode := '0'
+	cmdText := fmt.Sprintf("A0%c%s%s", mode, keyCode, scheme)
+	respBytes, err := km.connection.ExecuteCommand([]byte(cmdText), 5*time.Second)
+	if err != nil {
+		dialog.ShowError(err, fyne.CurrentApp().Driver().AllWindows()[0])
+
+		return
+	}
+	respStr := string(respBytes)
+
+	// check response code.
+	if !strings.HasPrefix(respStr, "A1") {
+		dialog.ShowError(
+			fmt.Errorf("unexpected response code: %s", respStr[:2]),
+			fyne.CurrentApp().Driver().AllWindows()[0],
+		)
+
+		return
+	}
+
+	// parse error code.
+	errCode := respStr[2:4]
+	if errCode != "00" {
+		var msg string
+		switch errCode {
+		case "07":
+			msg = "invalid zka master key type"
+		case "10":
+			msg = "zmk or tmk parity error"
+		case "68":
+			msg = "command disabled"
+		default:
+			msg = "error code " + errCode
+		}
+
+		dialog.ShowError(
+			fmt.Errorf(msg),
+			fyne.CurrentApp().Driver().AllWindows()[0],
+		)
+
+		return
+	}
+
+	// extract encrypted key and kcv.
+	encrypted := respStr[4 : len(respStr)-6]
+	kcvVal := respStr[len(respStr)-6:]
+
+	// display results.
+	km.keyInput.SetText(encrypted)
+	km.kcv.SetText("KCV: " + kcvVal)
 }
 
 // CreateRenderer implements fyne.Widget interface.

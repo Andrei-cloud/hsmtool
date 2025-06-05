@@ -41,9 +41,9 @@ type DESParams struct {
 	Encrypt bool
 }
 
-// CalculateKCV calculates Key Check Value (first 3 bytes of encrypting zeros).
-// CalculateKCV calculates a KCV (key check value) for a given key and returns it as a hex string.
-// Returns error if key validation or calculation fails.
+// CalculateKCV returns the key check value (first 3 encrypted zero bytes) for
+// the given key as a hex string. It returns an error if validation or
+// calculation fails.
 func CalculateKCV(key []byte) (string, error) {
 	if len(key) != 8 && len(key) != 16 && len(key) != 24 {
 		return "", errors.New("invalid key length: must be 8, 16, or 24 bytes")

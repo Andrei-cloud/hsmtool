@@ -148,16 +148,31 @@ func pad(data []byte, blockSize int, mode PaddingMode) ([]byte, error) {
 		return data, nil
 	}
 
+	// Determine padding length based on mode.
 	padLen := blockSize - (len(data) % blockSize)
+
+	// ISO97971 should not add an extra block when data already aligns.
+	if mode == ISO97971 && padLen == blockSize {
+		padLen = 0
+	}
+	// ISO97972 always appends at least one byte (0x80) even if already aligned.
+	if mode == ISO97972 && padLen == blockSize {
+		// keep padLen as blockSize so we append a full block
+	}
+
+	if padLen == 0 {
+		return data, nil
+	}
+
 	padded := make([]byte, len(data)+padLen)
 	copy(padded, data)
 
 	switch mode {
 	case ISO97971:
-		// Pad with zeros.
+		// Pad with zeros only.
 		return padded, nil
 	case ISO97972:
-		// Append 0x80 followed by zeros.
+		// Insert 0x80 then zeros.
 		padded[len(data)] = 0x80
 		return padded, nil
 	default:

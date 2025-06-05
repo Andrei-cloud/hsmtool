@@ -610,6 +610,7 @@ func (bc *BitwiseCalculator) onGenerateKey(bitLen int) func() {
 		}
 
 		if num == 3 && len(components) > 2 {
+			bc.comp3.SetText(strings.ToUpper(components[2]))
 			data3, err3 := hex.DecodeString(components[2])
 			if err3 == nil && len(data3) > 0 {
 				if len(data3) == 32 {
